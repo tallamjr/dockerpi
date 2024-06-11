@@ -1,6 +1,6 @@
 # Build stage for qemu-system-arm
 FROM debian:stable-slim AS qemu-builder
-ARG QEMU_VERSION=6.0.0
+ARG QEMU_VERSION=8.2.4
 ENV QEMU_TARBALL="qemu-${QEMU_VERSION}.tar.xz"
 WORKDIR /qemu
 
@@ -10,6 +10,8 @@ RUN apt-get update
 RUN # Pull source
 RUN apt-get -y install wget
 RUN wget "https://download.qemu.org/${QEMU_TARBALL}"
+
+RUN apt-get -y install xz-utils
 
 RUN # Verify signatures
 RUN apt-get -y install gpg
@@ -23,17 +25,18 @@ RUN tar xvf "${QEMU_TARBALL}"
 
 RUN # Build source
 # These seem to be the only deps actually required for a successful  build
-RUN apt-get -y install python build-essential libglib2.0-dev libpixman-1-dev ninja-build
+RUN apt-get -y install python3.11-venv build-essential git libglib2.0-dev libfdt-dev libpixman-1-dev zlib1g-dev ninja-build
 # These don't seem to be required but are specified here: https://wiki.qemu.org/Hosts/Linux
 RUN apt-get -y install libfdt-dev zlib1g-dev
 # Not required or specified anywhere but supress build warnings
 RUN apt-get -y install flex bison
-RUN "qemu-${QEMU_VERSION}/configure" --static --target-list=arm-softmmu,aarch64-softmmu
-RUN make -j$(nproc)
+WORKDIR "qemu-${QEMU_VERSION}"
+RUN rm -rf ./build
+RUN CFLAGS="-fPIC" CXXFLAGS="-fPIC" ./configure --static --disable-gio --target-list=arm-softmmu
+RUN make clean && make VERBOSE=1 -j$(nproc)
 
 RUN # Strip the binary, this gives a substantial size reduction!
-RUN strip "arm-softmmu/qemu-system-arm" "aarch64-softmmu/qemu-system-aarch64" "qemu-img"
-
+RUN strip "arm-softmmu/qemu-system-arm" "qemu-img"
 
 # Build stage for fatcat
 FROM debian:stable-slim AS fatcat-builder
@@ -66,7 +69,7 @@ ARG RPI_KERNEL_URL="https://github.com/dhruvvyas90/qemu-rpi-kernel/archive/afe41
 ARG RPI_KERNEL_CHECKSUM="295a22f1cd49ab51b9e7192103ee7c917624b063cc5ca2e11434164638aad5f4"
 
 COPY --from=qemu-builder /qemu/arm-softmmu/qemu-system-arm /usr/local/bin/qemu-system-arm
-COPY --from=qemu-builder /qemu/aarch64-softmmu/qemu-system-aarch64 /usr/local/bin/qemu-system-aarch64
+# COPY --from=qemu-builder /qemu/aarch64-softmmu/qemu-system-aarch64 /usr/local/bin/qemu-system-aarch64
 COPY --from=qemu-builder /qemu/qemu-img /usr/local/bin/qemu-img
 COPY --from=fatcat-builder /fatcat/fatcat /usr/local/bin/fatcat
 
